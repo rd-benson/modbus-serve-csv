@@ -52,7 +52,7 @@ var rootCmd = &cobra.Command{
 
 		go func() {
 			for {
-				time.Sleep(250 * time.Millisecond)
+				time.Sleep(500 * time.Millisecond)
 				readValues()
 			}
 		}()
