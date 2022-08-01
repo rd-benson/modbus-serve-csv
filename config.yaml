@@ -1,0 +1,7 @@
+servers:
+    - filename: classroom_1.csv
+      port: 5000
+      slaveid: 1
+    - filename: classroom_2.csv
+      port: 5001
+      slaveid: 1
