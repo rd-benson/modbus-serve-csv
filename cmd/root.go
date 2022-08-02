@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"sync"
 	"syscall"
 	"time"
 
@@ -30,9 +29,10 @@ var timeout uint16
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:     "modbus-serve-csv",
-	Short:   "Simulate modbus servers from CSV data",
-	Long:    `See github.com/rd-benson/modbus-serve-csv for full documentation.`,
+	Use:   "modbus-serve-csv",
+	Short: "Simulate modbus servers from CSV data",
+	Long: `Simulate modbus servers from CSV data in this directory.
+See github.com/rd-benson/modbus-serve-csv for full documentation.`,
 	Example: "modbus-serve-csv [-T timestep] [-F files...]",
 	Run: func(cmd *cobra.Command, args []string) {
 		// Read in the configuration
@@ -53,16 +53,16 @@ var rootCmd = &cobra.Command{
 		}
 		signal.Notify(termSignal.interrupt, syscall.SIGINT, syscall.SIGTERM)
 
-		sim := runSim(ticker, &termSignal)
+		runSim(ticker, &termSignal)
 
-		go func() {
+		// Uncomment to print csv values continuously
+		/* go func() {
 			for {
-				time.Sleep(500 * time.Millisecond)
+				time.Sleep(2500 * time.Millisecond)
 				readValues()
 			}
-		}()
+		}() */
 
-		sim.Wait()
 		// Automatic timeout
 		T, err := time.ParseDuration(fmt.Sprintf("%dh", timeout))
 		cobra.CheckErr(err)
@@ -83,9 +83,9 @@ func Execute() {
 
 func init() {
 	cobra.OnInitialize(initConfig)
-	rootCmd.PersistentFlags().Uint16VarP(&timestep, "timestep", "t", 1, "Set simulation timestep.")
-	rootCmd.PersistentFlags().Uint16VarP(&timeout, "timeout", "T", 1, "Set simulation timestep.")
-	rootCmd.PersistentFlags().StringSliceP("files", "F", nil, "Simulate given files.")
+	rootCmd.PersistentFlags().Uint16VarP(&timestep, "timestep", "t", 30, "Simulation timestep in seconds")
+	rootCmd.PersistentFlags().Uint16VarP(&timeout, "timeout", "T", 1, "Automatic timeout period in hours.")
+	rootCmd.PersistentFlags().StringSliceP("files", "F", nil, "Simulate only supplied files.")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -169,23 +169,21 @@ func initSim(cfg AppConfig, files []string) {
 }
 
 // run the simulation
-func runSim(ticker *time.Ticker, termSignal *Termination) *sync.WaitGroup {
-	sim := new(sync.WaitGroup)
-	sim.Add(len(simulations))
+func runSim(ticker *time.Ticker, termSignal *Termination) {
 	fmt.Printf("Starting simulation (timestep=%ds) of ...\n", timestep)
 	fmt.Printf("Automatic timeout after %dh, or CTRL-C to end simulation.\n", timeout)
-	Cycle(simulations, ticker, termSignal)
+	// Cycle(simulations, ticker, termSignal)
+	Serve(simulations, ticker, termSignal)
 	fmt.Println("Simulation started")
-	return sim
 }
 
 // Read values helper
-func readValues() {
+/* func readValues() {
 	for i := 0; i < len(simulations); i++ {
 		fmt.Printf("%v: %v\t", simulations[i].reader.filename, simulations[i].reader.value)
 	}
 	fmt.Println()
-}
+} */
 
 // Test if a slice contains an element
 func stringSliceContains(testElem string, slice []string) bool {

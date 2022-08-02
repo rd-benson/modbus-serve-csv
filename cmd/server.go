@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -20,43 +22,39 @@ type Config struct {
 }
 
 type Params struct {
-	RegAddress    uint16
-	RegType       string
-	ByteSwap      bool
-	WordSwap      bool
-	ValueType     string
-	registerCount int
+	RegAddress uint16
+	RegType    string
+	ByteSwap   bool
+	ValueType  string
+	byteOrder  binary.ByteOrder
+}
+
+func (p *Params) getByteOrder() {
+	if p.ByteSwap {
+		p.byteOrder = binary.LittleEndian
+	} else {
+		p.byteOrder = binary.BigEndian
+	}
 }
 
 var validValueTypes = []string{"bool", "int8", "int16", "uint32", "uint8", "uint16", "uint32", "float32", "float64"}
 
-func getRegisterCount(valueType string) int {
-	switch valueType {
-	case "bool", "int8", "int16", "uint8", "uint16":
-		return 1
-	case "float64", "int64", "uint64":
-		return 4
-	default: // case "float32", "int32", "uint32":
-		return 2
-	}
-}
-
 func newDefaultParams() Params {
-	return Params{
-		RegAddress:    0,
-		RegType:       "holding",
-		ByteSwap:      false,
-		WordSwap:      false,
-		ValueType:     "float32",
-		registerCount: getRegisterCount("float32"),
+	p := Params{
+		RegAddress: 0,
+		RegType:    "holding",
+		ByteSwap:   false,
+		ValueType:  "int16",
 	}
+	p.getByteOrder()
+	return p
 }
 
 type LoopReader struct {
 	filename string
 	file     *os.File
 	reader   *csv.Reader
-	value    []any
+	value    [][]byte
 	params   []Params
 }
 
@@ -71,61 +69,86 @@ func (lr *LoopReader) close() {
 	lr.file.Close()
 }
 
-func parseRecord(valueType string, s string) (any, error) {
+func parseRecord(byteOrder binary.ByteOrder, valueType string, s string) ([]byte, error) {
+
+	buf := new(bytes.Buffer)
+	var err error
+
 	switch valueType {
+	// Bool:
 	case "bool":
-		return strconv.ParseBool(s)
+		val, e := strconv.ParseBool(s)
+		cobra.CheckErr(e)
+		err = binary.Write(buf, byteOrder, bool(val))
+	// Int
 	case "int8":
-		return strconv.ParseInt(s, 10, 8)
+		val, e := strconv.ParseInt(s, 10, 8)
+		cobra.CheckErr(e)
+		err = binary.Write(buf, byteOrder, int8(val))
 	case "int16":
-		return strconv.ParseInt(s, 10, 16)
+		val, e := strconv.ParseUint(s, 10, 16)
+		cobra.CheckErr(e)
+		err = binary.Write(buf, byteOrder, int16(val))
 	case "int32":
-		return strconv.ParseInt(s, 10, 32)
+		val, e := strconv.ParseUint(s, 10, 32)
+		cobra.CheckErr(e)
+		err = binary.Write(buf, byteOrder, int32(val))
 	case "int64":
-		return strconv.ParseInt(s, 10, 32)
+		val, e := strconv.ParseInt(s, 10, 64)
+		cobra.CheckErr(e)
+		err = binary.Write(buf, byteOrder, int64(val))
+	// Uint
 	case "uint8":
-		return strconv.ParseUint(s, 10, 8)
+		val, e := strconv.ParseUint(s, 10, 8)
+		cobra.CheckErr(e)
+		err = binary.Write(buf, byteOrder, uint8(val))
 	case "uint16":
-		return strconv.ParseUint(s, 10, 16)
+		val, e := strconv.ParseUint(s, 10, 16)
+		cobra.CheckErr(e)
+		err = binary.Write(buf, byteOrder, uint16(val))
 	case "uint32":
-		return strconv.ParseUint(s, 10, 32)
+		val, e := strconv.ParseUint(s, 10, 32)
+		cobra.CheckErr(e)
+		err = binary.Write(buf, byteOrder, uint32(val))
 	case "uint64":
-		return strconv.ParseUint(s, 10, 32)
+		val, e := strconv.ParseUint(s, 10, 64)
+		cobra.CheckErr(e)
+		err = binary.Write(buf, byteOrder, uint64(val))
+		// Float
+	case "float32":
+		val, e := strconv.ParseFloat(s, 32)
+		cobra.CheckErr(e)
+		err = binary.Write(buf, byteOrder, float32(val))
 	case "float64":
-		return strconv.ParseFloat(s, 64)
-	default:
-		return strconv.ParseFloat(s, 32)
+		val, e := strconv.ParseFloat(s, 64)
+		cobra.CheckErr(e)
+		err = binary.Write(buf, byteOrder, float64(val))
 	}
+	return buf.Bytes(), err
 }
 
-func (lr *LoopReader) nextRecord() {
+func (lr *LoopReader) readRecord() {
 	stringRecord, err := lr.reader.Read()
 	if err == io.EOF {
 		lr.getReader()
-		lr.nextRecord()
+		lr.readRecord()
 	} else if err != nil {
 		panic(err)
 	}
-	if len(stringRecord) == 1 {
-		val, err := parseRecord(lr.params[0].ValueType, stringRecord[0])
-		cobra.CheckErr(err)
-		lr.value = []any{val}
-	} else {
-		for i, s := range stringRecord {
-			val, err := parseRecord(lr.params[i].ValueType, s)
-			if err == nil {
-				lr.value[i] = val
-			}
+	for i, s := range stringRecord {
+		val, err := parseRecord(lr.params[i].byteOrder, lr.params[i].ValueType, s)
+		if err == nil {
+			lr.value[i] = val
 		}
 	}
 }
 
-func (lr *LoopReader) cycle() {
+func (lr *LoopReader) nextRecord() {
 	if lr.reader == nil {
 		lr.getReader()
-		lr.cycle()
+		lr.nextRecord()
 	}
-	lr.nextRecord()
+	lr.readRecord()
 }
 
 type Simulation struct {
@@ -135,16 +158,19 @@ type Simulation struct {
 	server *mbserver.Server
 }
 
+func (s *Simulation) update() {
+	s.reader.nextRecord()
+	updateServer(s)
+}
+
 func validateParams(paramsSlice []Params) []Params {
 	for i, params := range paramsSlice {
 		var errs []error = nil
 		switch params.RegType {
 		case "coil", "discrete":
 			params.ByteSwap = false
-			params.WordSwap = false
 			params.ValueType = "bool"
 		case "input", "holding":
-			params.RegType = "input"
 			if !stringSliceContains(params.ValueType, validValueTypes) {
 				errs = append(errs, fmt.Errorf("unrecognised value type"))
 				params.ValueType = "float32"
@@ -156,7 +182,7 @@ func validateParams(paramsSlice []Params) []Params {
 				params.ValueType = "float32"
 			}
 		}
-		params.registerCount = getRegisterCount(params.ValueType)
+		params.getByteOrder()
 		for err := range errs {
 			fmt.Printf("Error: %v (defaults will be used instead)\n", err)
 		}
@@ -166,18 +192,10 @@ func validateParams(paramsSlice []Params) []Params {
 	return paramsSlice
 }
 
-/* func (s *Simulation) listen() {
-	err := s.server.ListenTCP(fmt.Sprintf("0.0.0.0:%v", s.port))
-	cobra.CheckErr(err)
-	defer s.server.Close()
-	for {
-		time.Sleep(1 * time.Second)
-	}
-} */
-
 // Helper constructor method to generate new simulation from config struct
 func NewSimulation(c Config) Simulation {
 	params := validateParams(c.Params)
+	value := make([][]byte, len(params))
 	sim := Simulation{
 		port: c.Port,
 		id:   c.SlaveId,
@@ -185,25 +203,49 @@ func NewSimulation(c Config) Simulation {
 			filename: c.Filename,
 			file:     nil,
 			reader:   nil,
-			value:    nil,
+			value:    value,
 			params:   params,
 		},
 		server: mbserver.NewServer(),
 	}
 	sim.reader.getReader()
-	sim.reader.nextRecord()
+	sim.reader.readRecord()
 	return sim
 }
 
-type Termination struct {
-	interrupt chan os.Signal
-	timeout   chan bool
+func replaceSubSlice(dst *[]uint16, src []byte, start uint16) {
+	data := mbserver.BytesToUint16(src)
+	for i := 0; i < len(data); i++ {
+		(*dst)[start+uint16(i)] = data[i]
+	}
 }
 
-// Cycle instructs each simulation to update to the next value in it's file.
+func updateServer(s *Simulation) {
+	for i, param := range s.reader.params {
+		addr := param.RegAddress
+		switch param.RegType {
+		case "coil":
+			s.server.Coils[addr] = s.reader.value[i][0]
+		case "discrete":
+			s.server.DiscreteInputs[addr] = s.reader.value[i][0]
+		case "holding":
+			replaceSubSlice(&s.server.HoldingRegisters, s.reader.value[i], addr)
+		case "input":
+			replaceSubSlice(&s.server.InputRegisters, s.reader.value[i], addr)
+		}
+	}
+}
+
+// Server instructs each simulation to:
+// 	- listen on 0.0.0.0:port
+// 	- update to the next value in it's file.
 // All simulations in s are updated simulataneously
-func Cycle(s []Simulation, ticker *time.Ticker, term *Termination) {
+func Serve(s []Simulation, ticker *time.Ticker, term *Termination) {
 	go func() {
+		for i := 0; i < len(s); i++ {
+			err := s[i].server.ListenTCP(fmt.Sprintf("0.0.0.0:%v", s[i].port))
+			cobra.CheckErr(err)
+		}
 		for {
 			select {
 			case <-term.interrupt:
@@ -214,17 +256,23 @@ func Cycle(s []Simulation, ticker *time.Ticker, term *Termination) {
 				return
 			case <-ticker.C:
 				for i := 0; i < len(s); i++ {
-					s[i].reader.cycle()
+					s[i].update()
 				}
 			}
 		}
 	}()
 }
 
+type Termination struct {
+	interrupt chan os.Signal
+	timeout   chan bool
+}
+
 func Terminate(s []Simulation, reason string) {
 	fmt.Printf("Simulation terminated: %v\n", reason)
 	for i := 0; i < len(s); i++ {
 		s[i].reader.close()
+		s[i].server.Close()
 	}
 	os.Exit(0)
 }

@@ -6,8 +6,7 @@ servers:
         - regaddress: 0
           regtype: holding
           byteswap: false
-          wordswap: false
-          valuetype: float32
+          valuetype: int16
     - filename: classroom_2.csv
       port: 5001
       slaveid: 1
@@ -15,8 +14,7 @@ servers:
         - regaddress: 0
           regtype: holding
           byteswap: false
-          wordswap: false
-          valuetype: float32
+          valuetype: int16
     - filename: classroom_3.csv
       port: 5002
       slaveid: 1
@@ -24,5 +22,4 @@ servers:
         - regaddress: 0
           regtype: coil
           byteswap: false
-          wordswap: false
           valuetype: bool
