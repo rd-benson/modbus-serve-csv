@@ -2,12 +2,10 @@ package cmd
 
 import (
 	"encoding/csv"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -15,18 +13,19 @@ import (
 )
 
 type Config struct {
-	Filename string `mapstructure:"filename"`
-	Port     uint16 `mapstructure:"port"`
-	SlaveId  uint8  `mapstructure:"slave-id"`
+	Filename string
+	Port     uint16
+	SlaveId  uint8
+	Params   []Params
 }
 
 type Params struct {
-	registerAddress uint16
-	registerType    uint8
-	byteSwap        bool
-	wordSwap        bool
-	valueType       string
-	registerCount   int
+	RegAddress    uint16
+	RegType       string
+	ByteSwap      bool
+	WordSwap      bool
+	ValueType     string
+	registerCount int
 }
 
 var validValueTypes = []string{"bool", "int8", "int16", "uint32", "uint8", "uint16", "uint32", "float32", "float64"}
@@ -44,65 +43,13 @@ func getRegisterCount(valueType string) int {
 
 func newDefaultParams() Params {
 	return Params{
-		registerAddress: 0,
-		registerType:    2,
-		byteSwap:        false,
-		wordSwap:        false,
-		valueType:       "float32",
-		registerCount:   getRegisterCount("float32"),
+		RegAddress:    0,
+		RegType:       "holding",
+		ByteSwap:      false,
+		WordSwap:      false,
+		ValueType:     "float32",
+		registerCount: getRegisterCount("float32"),
 	}
-}
-
-func parseHeader(header []string) (Params, []error) {
-	params := newDefaultParams()
-	var errs []error = nil
-	if len(header) != 5 {
-		return params, errs
-	}
-	for i, param := range header {
-		switch i {
-		case 0:
-			p, err := strconv.ParseUint(param, 10, 16)
-			if err != nil {
-				errs = append(errs, err)
-				break
-			}
-			params.registerAddress = uint16(p)
-		case 1:
-			p, err := strconv.ParseUint(param, 10, 8)
-			if err != nil {
-				errs = append(errs, err)
-				break
-			}
-			if p > 3 {
-				errs = append(errs, errors.New("registerType"))
-				break
-			}
-			params.registerType = uint8(p)
-		case 2:
-			p, err := strconv.ParseBool(param)
-			if err != nil {
-				errs = append(errs, err)
-				break
-			}
-			params.byteSwap = p
-		case 3:
-			p, err := strconv.ParseBool(param)
-			if err != nil {
-				errs = append(errs, err)
-				break
-			}
-			params.wordSwap = p
-		case 4:
-			if !stringSliceContains(param, validValueTypes) {
-				errs = append(errs, errors.New("valueType"))
-				break
-			}
-			params.valueType = param
-		}
-	}
-	params.registerCount = getRegisterCount(params.valueType)
-	return params, errs
 }
 
 type LoopReader struct {
@@ -114,33 +61,14 @@ type LoopReader struct {
 }
 
 func (lr *LoopReader) getReader() {
-	f, err := os.Open("./data/" + lr.filename)
+	f, err := os.Open(lr.filename)
 	cobra.CheckErr(err)
 	lr.file = f
 	lr.reader = csv.NewReader(lr.file)
 }
 
 func (lr *LoopReader) close() {
-	fmt.Printf("closing %v\n", lr.filename)
 	lr.file.Close()
-}
-
-func (lr *LoopReader) parseParams() {
-	stringRecord, err := lr.reader.Read()
-	if err == io.EOF {
-		lr.close()
-		panic(fmt.Errorf("no data in %v", lr.filename))
-	} else if err != nil {
-		panic(err)
-	}
-	for _, s := range stringRecord {
-		p, err := parseHeader(strings.Split(s, "|"))
-		if err != nil {
-			fmt.Printf("Error! Check header (%v)", lr.filename)
-		}
-		lr.params = append(lr.params, p)
-	}
-	fmt.Printf("Parsed params for %v: %v\n", lr.filename, lr.params)
 }
 
 func parseRecord(valueType string, s string) (any, error) {
@@ -170,22 +98,21 @@ func parseRecord(valueType string, s string) (any, error) {
 	}
 }
 
-func (lr *LoopReader) updateRecord() {
+func (lr *LoopReader) nextRecord() {
 	stringRecord, err := lr.reader.Read()
 	if err == io.EOF {
 		lr.getReader()
-		lr.parseParams()
-		lr.updateRecord()
+		lr.nextRecord()
 	} else if err != nil {
 		panic(err)
 	}
 	if len(stringRecord) == 1 {
-		val, err := parseRecord(lr.params[0].valueType, stringRecord[0])
+		val, err := parseRecord(lr.params[0].ValueType, stringRecord[0])
 		cobra.CheckErr(err)
 		lr.value = []any{val}
 	} else {
 		for i, s := range stringRecord {
-			val, err := parseRecord(lr.params[i].valueType, s)
+			val, err := parseRecord(lr.params[i].ValueType, s)
 			if err == nil {
 				lr.value[i] = val
 			}
@@ -196,10 +123,9 @@ func (lr *LoopReader) updateRecord() {
 func (lr *LoopReader) cycle() {
 	if lr.reader == nil {
 		lr.getReader()
-		lr.parseParams()
 		lr.cycle()
 	}
-	lr.updateRecord()
+	lr.nextRecord()
 }
 
 type Simulation struct {
@@ -209,10 +135,35 @@ type Simulation struct {
 	server *mbserver.Server
 }
 
-func (s *Simulation) getInitialValue() {
-	s.reader.getReader()
-	s.reader.parseParams()
-	s.reader.updateRecord()
+func validateParams(paramsSlice []Params) []Params {
+	for i, params := range paramsSlice {
+		var errs []error = nil
+		switch params.RegType {
+		case "coil", "discrete":
+			params.ByteSwap = false
+			params.WordSwap = false
+			params.ValueType = "bool"
+		case "input", "holding":
+			params.RegType = "input"
+			if !stringSliceContains(params.ValueType, validValueTypes) {
+				errs = append(errs, fmt.Errorf("unrecognised value type"))
+				params.ValueType = "float32"
+			}
+		default:
+			errs = append(errs, fmt.Errorf("unrecognised register type"))
+			if !stringSliceContains(params.ValueType, validValueTypes) {
+				errs = append(errs, fmt.Errorf("unrecognised value type"))
+				params.ValueType = "float32"
+			}
+		}
+		params.registerCount = getRegisterCount(params.ValueType)
+		for err := range errs {
+			fmt.Printf("Error: %v (defaults will be used instead)\n", err)
+		}
+		paramsSlice[i] = params
+	}
+
+	return paramsSlice
 }
 
 /* func (s *Simulation) listen() {
@@ -226,6 +177,7 @@ func (s *Simulation) getInitialValue() {
 
 // Helper constructor method to generate new simulation from config struct
 func NewSimulation(c Config) Simulation {
+	params := validateParams(c.Params)
 	sim := Simulation{
 		port: c.Port,
 		id:   c.SlaveId,
@@ -234,10 +186,12 @@ func NewSimulation(c Config) Simulation {
 			file:     nil,
 			reader:   nil,
 			value:    nil,
+			params:   params,
 		},
 		server: mbserver.NewServer(),
 	}
-	sim.getInitialValue()
+	sim.reader.getReader()
+	sim.reader.nextRecord()
 	return sim
 }
 
@@ -259,12 +213,9 @@ func Cycle(s []Simulation, ticker *time.Ticker, term *Termination) {
 				Terminate(s, "automatic timeout")
 				return
 			case <-ticker.C:
-				fmt.Print("reading from ... ")
 				for i := 0; i < len(s); i++ {
-					fmt.Printf("%v, ", s[i].reader.filename)
 					s[i].reader.cycle()
 				}
-				fmt.Println()
 			}
 		}
 	}()

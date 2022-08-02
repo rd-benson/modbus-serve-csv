@@ -5,6 +5,7 @@ Copyright © 2022 Ritchie+Daffin <dan.b@ritchiedaffin.com>
 package cmd
 
 import (
+	"encoding/csv"
 	"fmt"
 	"io/fs"
 	"os"
@@ -23,6 +24,7 @@ const defaultCfgFile = "config"
 var cfg AppConfig
 var simulations []Simulation
 var timestep uint16
+var timeout uint16
 
 // var sims Simulations
 
@@ -33,14 +35,17 @@ var rootCmd = &cobra.Command{
 	Long:    `See github.com/rd-benson/modbus-serve-csv for full documentation.`,
 	Example: "modbus-serve-csv [-T timestep] [-F files...]",
 	Run: func(cmd *cobra.Command, args []string) {
+		// Read in the configuration
 		viper.Unmarshal(&cfg)
 		files, err := cmd.Flags().GetStringSlice("files")
 		cobra.CheckErr(err)
+		// Set up servers for simulation (incl. comfig validation)
 		initSim(cfg, files)
 
-		T, err := time.ParseDuration(fmt.Sprintf("%ds", timestep))
+		// Ticker channel controls updating records
+		t, err := time.ParseDuration(fmt.Sprintf("%ds", timestep))
 		cobra.CheckErr(err)
-		ticker := time.NewTicker(T)
+		ticker := time.NewTicker(t)
 
 		termSignal := Termination{
 			interrupt: make(chan os.Signal, 1),
@@ -58,7 +63,10 @@ var rootCmd = &cobra.Command{
 		}()
 
 		sim.Wait()
-		time.Sleep(30 * time.Second)
+		// Automatic timeout
+		T, err := time.ParseDuration(fmt.Sprintf("%dh", timeout))
+		cobra.CheckErr(err)
+		time.Sleep(T)
 		ticker.Stop()
 		termSignal.timeout <- true
 	},
@@ -74,9 +82,9 @@ func Execute() {
 }
 
 func init() {
-	fmt.Println(os.Getpid())
 	cobra.OnInitialize(initConfig)
-	rootCmd.PersistentFlags().Uint16VarP(&timestep, "timestep", "T", 1, "Set simulation timestep.")
+	rootCmd.PersistentFlags().Uint16VarP(&timestep, "timestep", "t", 1, "Set simulation timestep.")
+	rootCmd.PersistentFlags().Uint16VarP(&timeout, "timeout", "T", 1, "Set simulation timestep.")
 	rootCmd.PersistentFlags().StringSliceP("files", "F", nil, "Simulate given files.")
 }
 
@@ -85,7 +93,6 @@ func initConfig() {
 
 	wd, err := os.Getwd()
 	cobra.CheckErr(err)
-	fmt.Println(wd)
 
 	viper.AddConfigPath(wd)
 	viper.SetConfigType("yaml")
@@ -107,19 +114,33 @@ type AppConfig struct {
 }
 
 // Create default configuration file
-func createDefaultConfiguration() (RC AppConfig) {
+func createDefaultConfiguration() []Config {
 	rC := []Config{}
-	// Get CSVs in ./data
-	CSVs := findByExt("data", ".csv")
-	for i, f := range CSVs {
+	// Get CSVs in folder
+	CSVs := findByExt("./", ".csv")
+	for i, filename := range CSVs {
+		// Read first line of csv to get number of columns
+		f, err := os.Open(filename)
+		cobra.CheckErr(err)
+		defer f.Close()
+		reader := csv.NewReader(f)
+		records, err := reader.Read()
+		cobra.CheckErr(err)
+		numCols := len(records)
+		// Populate default params
+		params := []Params{}
+		for i := 0; i < numCols; i++ {
+			params = append(params, newDefaultParams())
+		}
 		// Create default configuration for each CSV
 		rC = append(rC, Config{
-			Filename: f,
+			Filename: filename,
 			Port:     5000 + uint16(i),
 			SlaveId:  1,
+			Params:   params,
 		})
 	}
-	return AppConfig{rC}
+	return rC
 }
 
 // Find files of type ext in root directory
@@ -152,7 +173,9 @@ func runSim(ticker *time.Ticker, termSignal *Termination) *sync.WaitGroup {
 	sim := new(sync.WaitGroup)
 	sim.Add(len(simulations))
 	fmt.Printf("Starting simulation (timestep=%ds) of ...\n", timestep)
+	fmt.Printf("Automatic timeout after %dh, or CTRL-C to end simulation.\n", timeout)
 	Cycle(simulations, ticker, termSignal)
+	fmt.Println("Simulation started")
 	return sim
 }
 
