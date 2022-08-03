@@ -15,10 +15,12 @@ import (
 )
 
 type Config struct {
-	Filename string
-	Port     uint16
-	SlaveId  uint8
-	Params   []Params
+	Filename  string
+	Port      uint16
+	SlaveId   uint8
+	HasHeader bool
+	HasIndex  bool
+	Params    []Params
 }
 
 type Params struct {
@@ -51,11 +53,13 @@ func newDefaultParams() Params {
 }
 
 type LoopReader struct {
-	filename string
-	file     *os.File
-	reader   *csv.Reader
-	value    [][]byte
-	params   []Params
+	filename     string
+	ignoreHeader bool
+	ignoreIndex  bool
+	file         *os.File
+	reader       *csv.Reader
+	value        [][]byte
+	params       []Params
 }
 
 func (lr *LoopReader) getReader() {
@@ -63,6 +67,10 @@ func (lr *LoopReader) getReader() {
 	cobra.CheckErr(err)
 	lr.file = f
 	lr.reader = csv.NewReader(lr.file)
+	if lr.ignoreHeader {
+		_, err := lr.reader.Read()
+		cobra.CheckErr(err)
+	}
 }
 
 func (lr *LoopReader) close() {
@@ -135,12 +143,18 @@ func (lr *LoopReader) readRecord() {
 	} else if err != nil {
 		panic(err)
 	}
-	for i, s := range stringRecord {
+	var recordsToParse []string = stringRecord
+	if lr.ignoreIndex {
+		recordsToParse = stringRecord[1:]
+	}
+	for i, s := range recordsToParse {
 		val, err := parseRecord(lr.params[i].byteOrder, lr.params[i].ValueType, s)
+		fmt.Printf("loop i: %v ", i)
 		if err == nil {
 			lr.value[i] = val
 		}
 	}
+	fmt.Println()
 }
 
 func (lr *LoopReader) nextRecord() {
@@ -164,6 +178,7 @@ func (s *Simulation) update() {
 }
 
 func validateParams(paramsSlice []Params) []Params {
+
 	for i, params := range paramsSlice {
 		var errs []error = nil
 		switch params.RegType {
@@ -192,19 +207,47 @@ func validateParams(paramsSlice []Params) []Params {
 	return paramsSlice
 }
 
+func getCSVRecordCount(c Config) int {
+	f, err := os.Open(c.Filename)
+	cobra.CheckErr(err)
+	file := f
+	reader := csv.NewReader(file)
+	record, err := reader.Read()
+	cobra.CheckErr(err)
+	// Ignore first row, make sure we have the real data
+	if c.HasIndex {
+		record, err = reader.Read()
+		cobra.CheckErr(err)
+	}
+	recordCount := len(record)
+	if c.HasIndex {
+		recordCount -= 1
+	}
+	return recordCount
+
+}
+
 // Helper constructor method to generate new simulation from config struct
 func NewSimulation(c Config) Simulation {
 	params := validateParams(c.Params)
+	recordCount := getCSVRecordCount(c)
+	if len(params) != recordCount {
+		fmt.Println("insufficient []params in configuration!")
+		fmt.Printf("%v has %d data columns, config only supplied params for %d of these)", c.Filename, recordCount, len(params))
+		os.Exit(1)
+	}
 	value := make([][]byte, len(params))
 	sim := Simulation{
 		port: c.Port,
 		id:   c.SlaveId,
 		reader: LoopReader{
-			filename: c.Filename,
-			file:     nil,
-			reader:   nil,
-			value:    value,
-			params:   params,
+			filename:     c.Filename,
+			ignoreHeader: c.HasHeader,
+			ignoreIndex:  c.HasIndex,
+			file:         nil,
+			reader:       nil,
+			value:        value,
+			params:       params,
 		},
 		server: mbserver.NewServer(),
 	}
@@ -237,15 +280,16 @@ func updateServer(s *Simulation) {
 }
 
 // Server instructs each simulation to:
-// 	- listen on 0.0.0.0:port
-// 	- update to the next value in it's file.
+//   - listen on 0.0.0.0:port
+//   - update to the next value in it's file.
+//
 // All simulations in s are updated simulataneously
 func Serve(s []Simulation, ticker *time.Ticker, term *Termination) {
 	go func() {
-		for i := 0; i < len(s); i++ {
-			err := s[i].server.ListenTCP(fmt.Sprintf("0.0.0.0:%v", s[i].port))
-			cobra.CheckErr(err)
-		}
+		// for i := 0; i < len(s); i++ {
+		// 	err := s[i].server.ListenTCP(fmt.Sprintf("0.0.0.0:%v", s[i].port))
+		// 	cobra.CheckErr(err)
+		// }
 		for {
 			select {
 			case <-term.interrupt:

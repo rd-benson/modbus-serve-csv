@@ -1,6 +1,5 @@
 /*
 Copyright © 2022 Ritchie+Daffin <dan.b@ritchiedaffin.com>
-
 */
 package cmd
 
@@ -56,12 +55,12 @@ See github.com/rd-benson/modbus-serve-csv for full documentation.`,
 		runSim(ticker, &termSignal)
 
 		// Uncomment to print csv values continuously
-		/* go func() {
+		go func() {
 			for {
 				time.Sleep(2500 * time.Millisecond)
 				readValues()
 			}
-		}() */
+		}()
 
 		// Automatic timeout
 		T, err := time.ParseDuration(fmt.Sprintf("%dh", timeout))
@@ -134,10 +133,12 @@ func createDefaultConfiguration() []Config {
 		}
 		// Create default configuration for each CSV
 		rC = append(rC, Config{
-			Filename: filename,
-			Port:     5000 + uint16(i),
-			SlaveId:  1,
-			Params:   params,
+			Filename:  filename,
+			Port:      5000 + uint16(i),
+			SlaveId:   1,
+			HasHeader: false,
+			HasIndex:  false,
+			Params:    params,
 		})
 	}
 	return rC
@@ -162,10 +163,11 @@ func findByExt(root, ext string) []string {
 func initSim(cfg AppConfig, files []string) {
 	for _, c := range cfg.Configs {
 		if len(files) != 0 && !stringSliceContains(c.Filename, files) {
-			break
+			continue
 		}
 		simulations = append(simulations, NewSimulation(c))
 	}
+	fmt.Println("simulations, ", simulations)
 }
 
 // run the simulation
@@ -178,12 +180,12 @@ func runSim(ticker *time.Ticker, termSignal *Termination) {
 }
 
 // Read values helper
-/* func readValues() {
+func readValues() {
 	for i := 0; i < len(simulations); i++ {
 		fmt.Printf("%v: %v\t", simulations[i].reader.filename, simulations[i].reader.value)
 	}
 	fmt.Println()
-} */
+}
 
 // Test if a slice contains an element
 func stringSliceContains(testElem string, slice []string) bool {

@@ -6,7 +6,7 @@ servers:
         - regaddress: 0
           regtype: holding
           byteswap: false
-          valuetype: int16
+          valuetype: float32
     - filename: classroom_2.csv
       port: 5001
       slaveid: 1
@@ -23,3 +23,30 @@ servers:
           regtype: coil
           byteswap: false
           valuetype: bool
+    - filename: elec.csv
+      port: 5003
+      slaveid: 1
+      hasHeader: true
+      hasIndex: true
+      params:
+        - regaddress: 0
+          regtype: holding
+          byteswap: false
+          valuetype: float32
+        - regaddress: 2
+          regtype: holding
+          byteswap: false
+          valuetype: float32
+        - regaddress: 4
+          regtype: holding
+          byteswap: false
+          valuetype: float32
+        - regaddress: 6
+          regtype: holding
+          byteswap: false
+          valuetype: float32
+        - regaddress: 8
+          regtype: holding
+          byteswap: false
+          valuetype: float32
+
