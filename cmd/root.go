@@ -21,8 +21,8 @@ const defaultCfgFile = "config"
 
 var cfg AppConfig
 var simulations []Simulation
-var timestep uint16
-var timeout uint16
+var timestep, timeout uint16
+var verbose bool
 
 // var sims Simulations
 
@@ -54,11 +54,16 @@ See github.com/rd-benson/modbus-serve-csv for full documentation.`,
 
 		runSim(ticker, &termSignal)
 
-		// Uncomment to print csv values continuously
+		// Terminal printing
 		go func() {
+			i := 0
 			for {
-				time.Sleep(2500 * time.Millisecond)
-				readValues()
+				time.Sleep(t)
+				if verbose {
+					fmt.Printf("timestep = %d\n", i)
+					readValues()
+				}
+				i += 1
 			}
 		}()
 
@@ -85,6 +90,7 @@ func init() {
 	rootCmd.PersistentFlags().Uint16VarP(&timestep, "timestep", "t", 30, "Simulation timestep in seconds")
 	rootCmd.PersistentFlags().Uint16VarP(&timeout, "timeout", "T", 1, "Automatic timeout period in hours.")
 	rootCmd.PersistentFlags().StringSliceP("files", "F", nil, "Simulate only supplied files.")
+	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "Print current values to terminal.")
 }
 
 // initConfig reads in config file and ENV variables if set.

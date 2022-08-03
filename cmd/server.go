@@ -149,12 +149,10 @@ func (lr *LoopReader) readRecord() {
 	}
 	for i, s := range recordsToParse {
 		val, err := parseRecord(lr.params[i].byteOrder, lr.params[i].ValueType, s)
-		fmt.Printf("loop i: %v ", i)
 		if err == nil {
 			lr.value[i] = val
 		}
 	}
-	fmt.Println()
 }
 
 func (lr *LoopReader) nextRecord() {
@@ -286,10 +284,10 @@ func updateServer(s *Simulation) {
 // All simulations in s are updated simulataneously
 func Serve(s []Simulation, ticker *time.Ticker, term *Termination) {
 	go func() {
-		// for i := 0; i < len(s); i++ {
-		// 	err := s[i].server.ListenTCP(fmt.Sprintf("0.0.0.0:%v", s[i].port))
-		// 	cobra.CheckErr(err)
-		// }
+		for i := 0; i < len(s); i++ {
+			err := s[i].server.ListenTCP(fmt.Sprintf("0.0.0.0:%v", s[i].port))
+			cobra.CheckErr(err)
+		}
 		for {
 			select {
 			case <-term.interrupt:
