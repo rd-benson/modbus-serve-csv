@@ -139,12 +139,13 @@ func createDefaultConfiguration() []Config {
 		}
 		// Create default configuration for each CSV
 		rC = append(rC, Config{
-			Filename:  filename,
-			Port:      5000 + uint16(i),
-			SlaveId:   1,
-			HasHeader: false,
-			HasIndex:  false,
-			Params:    params,
+			Filename:    filename,
+			Port:        5000 + uint16(i),
+			SlaveId:     1,
+			HasHeader:   false,
+			HasIndex:    false,
+			MissingRate: 0,
+			Params:      params,
 		})
 	}
 	return rC
@@ -171,9 +172,13 @@ func initSim(cfg AppConfig, files []string) {
 		if len(files) != 0 && !stringSliceContains(c.Filename, files) {
 			continue
 		}
+		// Check 0 < missingRate < 1
+		if c.MissingRate < 0 || c.MissingRate >= 1 {
+			fmt.Printf("MissingRate error (%v)! Require 0<= MissingRate < 1. Setting to 0.", c.Filename)
+			c.MissingRate = 0
+		}
 		simulations = append(simulations, NewSimulation(c))
 	}
-	fmt.Println("simulations, ", simulations)
 }
 
 // run the simulation

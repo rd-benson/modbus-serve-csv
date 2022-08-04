@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"strconv"
 	"time"
@@ -15,12 +16,13 @@ import (
 )
 
 type Config struct {
-	Filename  string
-	Port      uint16
-	SlaveId   uint8
-	HasHeader bool
-	HasIndex  bool
-	Params    []Params
+	Filename    string
+	Port        uint16
+	SlaveId     uint8
+	HasHeader   bool
+	HasIndex    bool
+	MissingRate float32
+	Params      []Params
 }
 
 type Params struct {
@@ -165,15 +167,43 @@ func (lr *LoopReader) nextRecord() {
 }
 
 type Simulation struct {
-	port   uint16
-	id     uint8
-	reader LoopReader
-	server *mbserver.Server
+	port        uint16
+	id          uint8
+	reader      LoopReader
+	server      *mbserver.Server
+	missingRate float32
+	isListening bool
 }
 
 func (s *Simulation) update() {
 	s.reader.nextRecord()
 	updateServer(s)
+}
+
+func (s *Simulation) setRequestResponse(respond bool) {
+	defaults := map[uint8]func(s *mbserver.Server, frame mbserver.Framer) ([]byte, *mbserver.Exception){
+		1:  mbserver.ReadCoils,
+		2:  mbserver.ReadDiscreteInputs,
+		3:  mbserver.ReadHoldingRegisters,
+		4:  mbserver.ReadInputRegisters,
+		5:  mbserver.WriteSingleCoil,
+		6:  mbserver.WriteHoldingRegister,
+		15: mbserver.WriteMultipleCoils,
+		16: mbserver.WriteHoldingRegisters,
+	}
+	if respond {
+		for i, f := range defaults {
+			s.server.RegisterFunctionHandler(i, f)
+		}
+	} else {
+		for i := range defaults {
+			s.server.RegisterFunctionHandler(i, slaveDeviceBusy)
+		}
+	}
+}
+
+func slaveDeviceBusy(s *mbserver.Server, frame mbserver.Framer) ([]byte, *mbserver.Exception) {
+	return nil, &mbserver.SlaveDeviceFailure
 }
 
 func validateParams(paramsSlice []Params) []Params {
@@ -255,7 +285,9 @@ func NewSimulation(c Config) Simulation {
 			value:        value,
 			params:       params,
 		},
-		server: mbserver.NewServer(),
+		server:      mbserver.NewServer(),
+		missingRate: c.MissingRate,
+		isListening: false,
 	}
 	sim.reader.getReader()
 	sim.reader.readRecord()
@@ -306,7 +338,10 @@ func Serve(s []Simulation, ticker *time.Ticker, term *Termination) {
 				return
 			case <-ticker.C:
 				for i := 0; i < len(s); i++ {
+					// Update values
 					s[i].update()
+					// Mimick random connection issues by registering function handlers that return a slaveDeviceBusy response
+					s[i].setRequestResponse(rand.Float32() > s[i].missingRate)
 				}
 			}
 		}
