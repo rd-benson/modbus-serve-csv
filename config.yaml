@@ -3,6 +3,7 @@ servers:
       port: 5000
       slaveid: 1
       missingRate: 0
+      timestep: 5
       params:
         - regaddress: 0
           regtype: holding
@@ -12,6 +13,7 @@ servers:
       port: 5001
       slaveid: 1
       missingRate: 0.3
+      timestep: 5
       params:
         - regaddress: 0
           regtype: holding
@@ -21,6 +23,7 @@ servers:
       port: 5002
       slaveid: 1
       missingRate: 0.7
+      timestep: 10
       params:
         - regaddress: 0
           regtype: coil
@@ -32,6 +35,7 @@ servers:
       hasHeader: true
       hasIndex: true
       missingRate: 0.05
+      timestep: 12
       params:
         - regaddress: 0
           regtype: holding

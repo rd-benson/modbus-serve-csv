@@ -6,10 +6,8 @@ package cmd
 import (
 	"encoding/csv"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -23,8 +21,7 @@ var cfg AppConfig
 var simulations []Simulation
 var timestep, timeout uint16
 var verbose bool
-
-// var sims Simulations
+var totalTicks uint64
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -34,36 +31,38 @@ var rootCmd = &cobra.Command{
 See github.com/rd-benson/modbus-serve-csv for full documentation.`,
 	Example: "modbus-serve-csv [-T timestep] [-F files...]",
 	Run: func(cmd *cobra.Command, args []string) {
+		var err error
 		// Read in the configuration
 		viper.Unmarshal(&cfg)
 		files, err := cmd.Flags().GetStringSlice("files")
 		cobra.CheckErr(err)
+		timestepSet := cmd.Flag("timestep").Changed
 		// Set up servers for simulation (incl. comfig validation)
-		initSim(cfg, files)
+		baseTick := initSim(cfg, files, timestepSet)
 
-		// Ticker channel controls updating records
-		t, err := time.ParseDuration(fmt.Sprintf("%ds", timestep))
-		cobra.CheckErr(err)
-		ticker := time.NewTicker(t)
-
+		// Set up termination channels (user cancellation on CTRL-C or timeout)
 		termSignal := Termination{
 			interrupt: make(chan os.Signal, 1),
 			timeout:   make(chan bool),
 		}
 		signal.Notify(termSignal.interrupt, syscall.SIGINT, syscall.SIGTERM)
 
-		runSim(ticker, &termSignal)
+		// Ticker channel controls updating records
+		t, err := time.ParseDuration(fmt.Sprintf("%fns", baseTick))
+		cobra.CheckErr(err)
 
+		ticker := time.NewTicker(t)
+		runSim(ticker, &termSignal)
 		// Terminal printing
+		pt, err := time.ParseDuration(fmt.Sprintf("%ds", timestep))
+		cobra.CheckErr(err)
 		go func() {
-			i := 0
 			for {
-				time.Sleep(t)
+				time.Sleep(pt)
 				if verbose {
-					fmt.Printf("timestep = %d\n", i)
+					fmt.Printf("timestep = %d\n", totalTicks)
 					readValues()
 				}
-				i += 1
 			}
 		}()
 
@@ -90,7 +89,7 @@ func init() {
 	rootCmd.PersistentFlags().Uint16VarP(&timestep, "timestep", "t", 30, "Simulation timestep in seconds")
 	rootCmd.PersistentFlags().Uint16VarP(&timeout, "timeout", "T", 1, "Automatic timeout period in hours.")
 	rootCmd.PersistentFlags().StringSliceP("files", "F", nil, "Simulate only supplied files.")
-	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "Print current values to terminal.")
+	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "Print current values to terminal. Only if global timestep set.")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -151,25 +150,12 @@ func createDefaultConfiguration() []Config {
 	return rC
 }
 
-// Find files of type ext in root directory
-func findByExt(root, ext string) []string {
-	var a []string
-	filepath.WalkDir(root, func(s string, d fs.DirEntry, err error) error {
-		cobra.CheckErr(err)
-		if filepath.Ext(d.Name()) == ext {
-			s, err := filepath.Rel(root, s)
-			cobra.CheckErr(err)
-			a = append(a, s)
-		}
-		return nil
-	})
-	return a
-}
-
 // initSim reads configuration file and initiates Simulation instances
-func initSim(cfg AppConfig, files []string) {
+func initSim(cfg AppConfig, files []string, timestepSet bool) float64 {
+	var configTimesteps []uint16
 	for _, c := range cfg.Configs {
-		if len(files) != 0 && !stringSliceContains(c.Filename, files) {
+		// If files flag, only add those files to simulationb
+		if len(files) != 0 && !contains(c.Filename, files) {
 			continue
 		}
 		// Check 0 < missingRate < 1
@@ -177,8 +163,26 @@ func initSim(cfg AppConfig, files []string) {
 			fmt.Printf("MissingRate error (%v)! Require 0<= MissingRate < 1. Setting to 0.", c.Filename)
 			c.MissingRate = 0
 		}
+		configTimesteps = append(configTimesteps, c.Timestep)
 		simulations = append(simulations, NewSimulation(c))
 	}
+	if contains(uint16(0), configTimesteps) {
+		for i := 0; i < len(simulations); i++ {
+			simulations[i].baseTickMultiplier = 1
+		}
+		fmt.Printf("Timestep not defined for all files. All simulation will update at an interval of %ds.", timestep)
+		return 1e9 * float64(timestep)
+	}
+	// Assign baseTickMultiplier to each simulation
+	// First, get greatest common denominator
+	GCD := GCDSlice(configTimesteps)
+	// Then divide all baseTickMultiplier by the GCD
+	for i := 0; i < len(simulations); i++ {
+		simulations[i].baseTickMultiplier /= GCD
+	}
+	// Return baseTick = GCD * timestep / min(configTimesteps) in nanoseconds
+	min := minSliceUint(configTimesteps)
+	return 1e9 * float64(GCD*timestep) / float64(min)
 }
 
 // run the simulation
@@ -196,14 +200,4 @@ func readValues() {
 		fmt.Printf("%v: %v\t", simulations[i].reader.filename, simulations[i].reader.value)
 	}
 	fmt.Println()
-}
-
-// Test if a slice contains an element
-func stringSliceContains(testElem string, slice []string) bool {
-	for _, sliceElem := range slice {
-		if testElem == sliceElem {
-			return true
-		}
-	}
-	return false
 }

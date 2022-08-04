@@ -22,6 +22,7 @@ type Config struct {
 	HasHeader   bool
 	HasIndex    bool
 	MissingRate float32
+	Timestep    uint16
 	Params      []Params
 }
 
@@ -167,17 +168,34 @@ func (lr *LoopReader) nextRecord() {
 }
 
 type Simulation struct {
-	port        uint16
-	id          uint8
-	reader      LoopReader
-	server      *mbserver.Server
-	missingRate float32
-	isListening bool
+	port               uint16
+	id                 uint8
+	missingRate        float32
+	isListening        bool
+	reader             LoopReader
+	server             *mbserver.Server
+	baseTickMultiplier uint16
 }
 
 func (s *Simulation) update() {
 	s.reader.nextRecord()
-	updateServer(s)
+	s.updateServer()
+}
+
+func (s *Simulation) updateServer() {
+	for i, param := range s.reader.params {
+		addr := param.RegAddress
+		switch param.RegType {
+		case "coil":
+			s.server.Coils[addr] = s.reader.value[i][0]
+		case "discrete":
+			s.server.DiscreteInputs[addr] = s.reader.value[i][0]
+		case "holding":
+			replaceSubSlice(&s.server.HoldingRegisters, s.reader.value[i], addr)
+		case "input":
+			replaceSubSlice(&s.server.InputRegisters, s.reader.value[i], addr)
+		}
+	}
 }
 
 func (s *Simulation) setRequestResponse(respond bool) {
@@ -215,13 +233,13 @@ func validateParams(paramsSlice []Params) []Params {
 			params.ByteSwap = false
 			params.ValueType = "bool"
 		case "input", "holding":
-			if !stringSliceContains(params.ValueType, validValueTypes) {
+			if !contains(params.ValueType, validValueTypes) {
 				errs = append(errs, fmt.Errorf("unrecognised value type"))
 				params.ValueType = "float32"
 			}
 		default:
 			errs = append(errs, fmt.Errorf("unrecognised register type"))
-			if !stringSliceContains(params.ValueType, validValueTypes) {
+			if !contains(params.ValueType, validValueTypes) {
 				errs = append(errs, fmt.Errorf("unrecognised value type"))
 				params.ValueType = "float32"
 			}
@@ -274,8 +292,11 @@ func NewSimulation(c Config) Simulation {
 	}
 	value := make([][]byte, len(params))
 	sim := Simulation{
-		port: c.Port,
-		id:   c.SlaveId,
+		port:               c.Port,
+		id:                 c.SlaveId,
+		missingRate:        c.MissingRate,
+		isListening:        false,
+		baseTickMultiplier: c.Timestep,
 		reader: LoopReader{
 			filename:     c.Filename,
 			ignoreHeader: c.HasHeader,
@@ -285,9 +306,7 @@ func NewSimulation(c Config) Simulation {
 			value:        value,
 			params:       params,
 		},
-		server:      mbserver.NewServer(),
-		missingRate: c.MissingRate,
-		isListening: false,
+		server: mbserver.NewServer(),
 	}
 	sim.reader.getReader()
 	sim.reader.readRecord()
@@ -301,33 +320,17 @@ func replaceSubSlice(dst *[]uint16, src []byte, start uint16) {
 	}
 }
 
-func updateServer(s *Simulation) {
-	for i, param := range s.reader.params {
-		addr := param.RegAddress
-		switch param.RegType {
-		case "coil":
-			s.server.Coils[addr] = s.reader.value[i][0]
-		case "discrete":
-			s.server.DiscreteInputs[addr] = s.reader.value[i][0]
-		case "holding":
-			replaceSubSlice(&s.server.HoldingRegisters, s.reader.value[i], addr)
-		case "input":
-			replaceSubSlice(&s.server.InputRegisters, s.reader.value[i], addr)
-		}
-	}
-}
-
 // Server instructs each simulation to:
 //   - listen on 0.0.0.0:port
 //   - update to the next value in it's file.
 //
-// All simulations in s are updated simulataneously
+// All simulations in s are updated simulataneously at frequency defined by global timestep
 func Serve(s []Simulation, ticker *time.Ticker, term *Termination) {
 	go func() {
-		for i := 0; i < len(s); i++ {
-			err := s[i].server.ListenTCP(fmt.Sprintf("0.0.0.0:%v", s[i].port))
-			cobra.CheckErr(err)
-		}
+		// for i := 0; i < len(s); i++ {
+		// 	err := s[i].server.ListenTCP(fmt.Sprintf("0.0.0.0:%v", s[i].port))
+		// 	cobra.CheckErr(err)
+		// }
 		for {
 			select {
 			case <-term.interrupt:
@@ -337,11 +340,14 @@ func Serve(s []Simulation, ticker *time.Ticker, term *Termination) {
 				Terminate(s, "automatic timeout")
 				return
 			case <-ticker.C:
+				totalTicks += 1
 				for i := 0; i < len(s); i++ {
-					// Update values
-					s[i].update()
-					// Mimick random connection issues by registering function handlers that return a slaveDeviceBusy response
-					s[i].setRequestResponse(rand.Float32() > s[i].missingRate)
+					if totalTicks%uint64(s[i].baseTickMultiplier) == 0 {
+						// Update values
+						s[i].update()
+						// Mimick random connection issues by registering function handlers that return a slaveDeviceBusy response
+						s[i].setRequestResponse(rand.Float32() > s[i].missingRate)
+					}
 				}
 			}
 		}

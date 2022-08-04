@@ -31,6 +31,7 @@ servers:
     hasHeader: # bool
     hasIndex: # bool
     missingrate: # float32
+    timestep: # uint16
     params:
       - regaddress: # uint16
         regtype: # string
@@ -47,14 +48,23 @@ See an example at [configuration](https://github.com/rd-benson/modbus-serve-csv/
 
 ### Running
 ```bash
-modbus-serve-csv [-t timestep] [-T timeout] [-F files] [--verbose]
+modbus-serve-csv [-t timestep] [-T timeout] [-F files...] [--verbose]
 ```
 
-**timestep** controls update frequency (seconds)
+| flag | type | description |
+| ---- | ---- | ----------- |
+| timestep | uint16 | Set *global* timestep. See example below. |
+| timeout | uint16 | Set automatic timeout
+| files | string... | Only simulate these files (files must be contained in config.yaml)
+| verbose | | Print current timestep and simulated values (only if global timestep set)
 
-**timeout** set automatic timeout
+Update frequencies depending on value of supplied -t.
 
-**files** only simulate these files (still requires 
-configuration)
+| file | config timestep | flag not set | -t 5 | -t 10 | -t 8
+| - | - | - | - | - | - |
+| classroom_1.csv | 5 | 5 | 5 | 10 | 8 |
+| classroom_2.csv | 5 | 5 | 5 | 10 | 16 |
+| classroom_3.csv | 10 | 10 | 10 | 20 | 16 |
+| elec.csv | 12 | 12 | 12 | 24 | 19.2 |
 
-**verbose** print current timestep and simulated values
+All files must have timestep defined in configuration for this mode. Otherwise value of -t will be used for all.
