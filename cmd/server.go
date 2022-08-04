@@ -144,7 +144,8 @@ func (lr *LoopReader) readRecord() {
 		panic(err)
 	}
 	var recordsToParse []string = stringRecord
-	if lr.ignoreIndex {
+	// Don't ignore index if only one column
+	if lr.ignoreIndex && len(stringRecord) != 1 {
 		recordsToParse = stringRecord[1:]
 	}
 	for i, s := range recordsToParse {
@@ -211,6 +212,9 @@ func getCSVRecordCount(c Config) int {
 	file := f
 	reader := csv.NewReader(file)
 	record, err := reader.Read()
+	if err == io.EOF {
+		return 0
+	}
 	cobra.CheckErr(err)
 	// Ignore first row, make sure we have the real data
 	if c.HasIndex {
@@ -229,6 +233,10 @@ func getCSVRecordCount(c Config) int {
 func NewSimulation(c Config) Simulation {
 	params := validateParams(c.Params)
 	recordCount := getCSVRecordCount(c)
+	if recordCount == 0 {
+		fmt.Printf("%v is empty!", c.Filename)
+		os.Exit(1)
+	}
 	if len(params) != recordCount {
 		fmt.Println("insufficient []params in configuration!")
 		fmt.Printf("%v has %d data columns, config only supplied params for %d of these)", c.Filename, recordCount, len(params))
