@@ -176,7 +176,6 @@ func initSim(cfg AppConfig, files []string, timestepSet bool) float64 {
 	// Assign baseTickMultiplier to each simulation
 	// First, get greatest common denominator
 	var GCD uint16 = configTimesteps[0]
-	fmt.Println(len(configTimesteps))
 	if len(configTimesteps) != 1 {
 		GCD = GCDSlice(configTimesteps)
 	}
