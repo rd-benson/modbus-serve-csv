@@ -245,8 +245,8 @@ func validateParams(paramsSlice []Params) []Params {
 			}
 		}
 		params.getByteOrder()
-		for err := range errs {
-			fmt.Printf("Error: %v (defaults will be used instead)\n", err)
+		for _, err := range errs {
+			fmt.Printf("Error: %e (defaults will be used instead)\n", err)
 		}
 		paramsSlice[i] = params
 	}

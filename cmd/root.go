@@ -175,7 +175,11 @@ func initSim(cfg AppConfig, files []string, timestepSet bool) float64 {
 	}
 	// Assign baseTickMultiplier to each simulation
 	// First, get greatest common denominator
-	GCD := GCDSlice(configTimesteps)
+	var GCD uint16 = configTimesteps[0]
+	fmt.Println(len(configTimesteps))
+	if len(configTimesteps) != 1 {
+		GCD = GCDSlice(configTimesteps)
+	}
 	// Then divide all baseTickMultiplier by the GCD
 	for i := 0; i < len(simulations); i++ {
 		simulations[i].baseTickMultiplier /= GCD
