@@ -106,7 +106,12 @@ func initConfig() {
 	if err := viper.ReadInConfig(); err == nil {
 		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
 	} else {
-		// Use configuration defaults
+		// Use configuration defaults (if CSVs in directory)
+		// Check for CSVs
+		CSVs := findByExt("./", ".csv")
+		if len(CSVs) == 0 {
+			panic("no CSVs here!")
+		}
 		RC := createDefaultConfiguration()
 		viper.Set("servers", RC)
 		viper.SafeWriteConfig()

@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"io/fs"
+	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -38,18 +38,18 @@ func contains[T comparable](testElem T, slice []T) bool {
 	return false
 }
 
-// Find files of type ext in root directory
+// Find files of type ext in root directory only
 func findByExt(root, ext string) []string {
 	var a []string
-	filepath.WalkDir(root, func(s string, d fs.DirEntry, err error) error {
-		cobra.CheckErr(err)
+	dirEntries, err := os.ReadDir(root)
+	cobra.CheckErr(err)
+
+	for _, d := range dirEntries {
 		if filepath.Ext(d.Name()) == ext {
-			s, err := filepath.Rel(root, s)
-			cobra.CheckErr(err)
-			a = append(a, s)
+			a = append(a, filepath.Base(d.Name()))
 		}
-		return nil
-	})
+	}
+
 	return a
 }
 
