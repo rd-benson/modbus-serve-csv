@@ -1,7 +1,6 @@
 servers:
     - filename: classroom_1.csv
       port: 5000
-      slaveid: 1
       missingRate: 0
       timestep: 5
       params:
@@ -11,7 +10,6 @@ servers:
           valuetype: float32
     - filename: classroom_2.csv
       port: 5001
-      slaveid: 1
       missingRate: 0.3
       timestep: 5
       params:
@@ -21,7 +19,6 @@ servers:
           valuetype: int16
     - filename: classroom_3.csv
       port: 5002
-      slaveid: 1
       missingRate: 0.7
       timestep: 10
       params:
@@ -31,7 +28,6 @@ servers:
           valuetype: bool
     - filename: elec.csv
       port: 5003
-      slaveid: 1
       hasHeader: true
       hasIndex: true
       missingRate: 0.05

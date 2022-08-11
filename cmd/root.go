@@ -22,6 +22,8 @@ var simulations []Simulation
 var timestep, timeout uint16
 var verbose bool
 var totalTicks uint64
+var separate []string
+var baseTick float64
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -38,7 +40,7 @@ See github.com/rd-benson/modbus-serve-csv for full documentation.`,
 		cobra.CheckErr(err)
 		timestepSet := cmd.Flag("timestep").Changed
 		// Set up servers for simulation (incl. comfig validation)
-		baseTick := initSim(cfg, files, timestepSet)
+		initSim(cfg, files, timestepSet)
 
 		// Set up termination channels (user cancellation on CTRL-C or timeout)
 		termSignal := Termination{
@@ -90,6 +92,7 @@ func init() {
 	rootCmd.PersistentFlags().Uint16VarP(&timeout, "timeout", "T", 1, "Automatic timeout period in hours.")
 	rootCmd.PersistentFlags().StringSliceP("files", "F", nil, "Simulate only supplied files.")
 	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "Print current values to terminal. Only if global timestep set.")
+	rootCmd.PersistentFlags().StringSliceVarP(&separate, "separate", "s", nil, "Run each column on a different port (incrementing by regAddress) (use \"all\" to apply to all files).")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -145,7 +148,6 @@ func createDefaultConfiguration() []Config {
 		rC = append(rC, Config{
 			Filename:    filename,
 			Port:        5000 + uint16(i),
-			SlaveId:     1,
 			HasHeader:   false,
 			HasIndex:    false,
 			MissingRate: 0,
@@ -156,10 +158,15 @@ func createDefaultConfiguration() []Config {
 }
 
 // initSim reads configuration file and initiates Simulation instances
-func initSim(cfg AppConfig, files []string, timestepSet bool) float64 {
+func initSim(cfg AppConfig, files []string, timestepSet bool) {
 	var configTimesteps []uint16
+
+	// Check that supplied filename actually exists in config
+	err := checkFileFlagArgs(files)
+	cobra.CheckErr(err)
+
 	for _, c := range cfg.Configs {
-		// If files flag, only add those files to simulationb
+		// If files flag, only add those files to simulation
 		if len(files) != 0 && !contains(c.Filename, files) {
 			continue
 		}
@@ -168,20 +175,30 @@ func initSim(cfg AppConfig, files []string, timestepSet bool) float64 {
 			fmt.Printf("MissingRate error (%v)! Require 0<= MissingRate < 1. Setting to 0.", c.Filename)
 			c.MissingRate = 0
 		}
-		configTimesteps = append(configTimesteps, c.Timestep)
-		simulations = append(simulations, NewSimulation(c))
+		// Hacky but will do for now...
+		if contains("all", separate) || contains(c.Filename, separate) {
+			for i := 0; i < len(c.Params); i++ {
+				cAlt := c
+				cAlt.Port = c.Port + uint16(i)
+				simulations = append(simulations, NewSimulation(cAlt))
+				configTimesteps = append(configTimesteps, cAlt.Timestep)
+			}
+		} else {
+			simulations = append(simulations, NewSimulation(c))
+		}
 	}
 	if contains(uint16(0), configTimesteps) {
 		for i := 0; i < len(simulations); i++ {
 			simulations[i].baseTickMultiplier = 1
 		}
 		fmt.Printf("Timestep not defined for all files. All simulation will update at an interval of %ds.", timestep)
-		return 1e9 * float64(timestep)
+		baseTick = 1e9 * float64(timestep)
+		return
 	}
 	// Check if only one file provided, if so set baseTickMultipler to 1 and return timestep
 	if len(simulations) == 1 {
 		simulations[0].baseTickMultiplier = 1
-		return 1e9 * float64(timestep)
+		baseTick = 1e9 * float64(timestep)
 	}
 	// Assign baseTickMultiplier to each simulation
 	// First, get greatest common denominator
@@ -192,7 +209,25 @@ func initSim(cfg AppConfig, files []string, timestepSet bool) float64 {
 	}
 	// Return baseTick = GCD * timestep / min(configTimesteps) in nanoseconds
 	min := minSliceUint(configTimesteps)
-	return 1e9 * float64(GCD*timestep) / float64(min)
+	baseTick = 1e9 * float64(GCD*timestep) / float64(min)
+}
+
+func checkFileFlagArgs(files []string) error {
+	var cFilenames []string
+	fileFlagErr := false
+	for _, c := range cfg.Configs {
+		cFilenames = append(cFilenames, c.Filename)
+	}
+	for _, file := range files {
+		if !contains(file, cFilenames) {
+			fmt.Printf("%v given as file argument not in config!\n", file)
+			fileFlagErr = true
+		}
+	}
+	if fileFlagErr {
+		return fmt.Errorf("bad file flags")
+	}
+	return nil
 }
 
 // run the simulation

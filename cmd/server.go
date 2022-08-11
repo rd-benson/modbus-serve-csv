@@ -18,7 +18,6 @@ import (
 type Config struct {
 	Filename    string
 	Port        uint16
-	SlaveId     uint8
 	HasHeader   bool
 	HasIndex    bool
 	MissingRate float32
@@ -169,7 +168,6 @@ func (lr *LoopReader) nextRecord() {
 
 type Simulation struct {
 	port               uint16
-	id                 uint8
 	missingRate        float32
 	isListening        bool
 	reader             LoopReader
@@ -293,7 +291,6 @@ func NewSimulation(c Config) Simulation {
 	value := make([][]byte, len(params))
 	sim := Simulation{
 		port:               c.Port,
-		id:                 c.SlaveId,
 		missingRate:        c.MissingRate,
 		isListening:        false,
 		baseTickMultiplier: c.Timestep,
