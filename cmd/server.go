@@ -327,10 +327,10 @@ func replaceSubSlice(dst *[]uint16, src []byte, start uint16) {
 // All simulations in s are updated simulataneously at frequency defined by global timestep
 func Serve(s []Simulation, ticker *time.Ticker, term *Termination) {
 	go func() {
-		// for i := 0; i < len(s); i++ {
-		// 	err := s[i].server.ListenTCP(fmt.Sprintf("0.0.0.0:%v", s[i].port))
-		// 	cobra.CheckErr(err)
-		// }
+		for i := 0; i < len(s); i++ {
+			err := s[i].server.ListenTCP(fmt.Sprintf("0.0.0.0:%v", s[i].port))
+			cobra.CheckErr(err)
+		}
 		for {
 			select {
 			case <-term.interrupt:
