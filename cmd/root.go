@@ -178,6 +178,11 @@ func initSim(cfg AppConfig, files []string, timestepSet bool) float64 {
 		fmt.Printf("Timestep not defined for all files. All simulation will update at an interval of %ds.", timestep)
 		return 1e9 * float64(timestep)
 	}
+	// Check if only one file provided, if so set baseTickMultipler to 1 and return timestep
+	if len(simulations) == 1 {
+		simulations[0].baseTickMultiplier = 1
+		return 1e9 * float64(timestep)
+	}
 	// Assign baseTickMultiplier to each simulation
 	// First, get greatest common denominator
 	GCD := GCDSlice(configTimesteps)
