@@ -106,7 +106,12 @@ func initConfig() {
 	if err := viper.ReadInConfig(); err == nil {
 		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
 	} else {
-		// Use configuration defaults
+		// Use configuration defaults (if CSVs in directory)
+		// Check for CSVs
+		CSVs := findByExt("./", ".csv")
+		if len(CSVs) == 0 {
+			panic("no CSVs here!")
+		}
 		RC := createDefaultConfiguration()
 		viper.Set("servers", RC)
 		viper.SafeWriteConfig()
@@ -171,6 +176,11 @@ func initSim(cfg AppConfig, files []string, timestepSet bool) float64 {
 			simulations[i].baseTickMultiplier = 1
 		}
 		fmt.Printf("Timestep not defined for all files. All simulation will update at an interval of %ds.", timestep)
+		return 1e9 * float64(timestep)
+	}
+	// Check if only one file provided, if so set baseTickMultipler to 1 and return timestep
+	if len(simulations) == 1 {
+		simulations[0].baseTickMultiplier = 1
 		return 1e9 * float64(timestep)
 	}
 	// Assign baseTickMultiplier to each simulation
